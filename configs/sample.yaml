@@ -2,7 +2,8 @@
 # Sweden, to compare the two countries' embedding distributions with one shared
 # clustering (see the `compare` stage) without streaming the full ~1.2 TB.
 #
-# Size: 5 % of 15 863 tiles = 793 tiles, ~60 GB streamed, ~35 000 cells of 1 km.
+# Size: 5 % of 15 863 tiles = 793 tiles, ~60 GB streamed.
+# Measured 2026-11-27: 55 min with 8 workers (~14.6 tiles/min), 43 300 cells of 1 km.
 # Needs the GISCO boundary file (README "Country boundaries").
 run_name: sample
 seed: 42

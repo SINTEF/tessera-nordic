@@ -175,6 +175,7 @@ statistics are small (about 300 kB per tile, measured).
 | smoke (measured) | 4 | ~0.3 GB | 230 (of 253 before `min_pixel_count`) | 1.2 MB | 51 s end to end, 2 workers (aggregate 40 s) |
 | pilot (measured) | 80 | ~6 GB | 4 480 (of 4 565) | 24 MB | 6.5 min end to end, 4 workers (~12 tiles/min) |
 | pilot widened (lon 10–15, lat 63–64) | 500 | ~38 GB | ~28 000 | ~150 MB | 1–2 h, 4–8 workers |
+| sample, 5% of NO + SE (measured) | 793 | ~60 GB | 43 300 | +~240 MB | 55 min end to end, 8 workers (~14.6 tiles/min) |
 | full (NO + SE) | 15 863 (`make plan-full`, GISCO 1:1M) | ~1.2 TB | ~0.8 M | ~5 GB | 1–3 days, 8–16 workers |
 
 The full-run tile count comes from `make plan-full` with the GISCO boundary (an upper
