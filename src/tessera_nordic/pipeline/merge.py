@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
+from tessera_nordic import paths
 from tessera_nordic.area import load_area_geometry
 from tessera_nordic.config import RunConfig
 from tessera_nordic.grid import Grid, transformer
@@ -90,7 +91,10 @@ def run_merge(config: RunConfig, run_dir: Path, allow_incomplete: bool = False) 
 
     table: pd.DataFrame | None = None
     for name, info in summary["sources"].items():
-        df = source_table(name, Path(info["stats_dir"]), info["units"], allow_incomplete)
+        # Resolve from TN_DATA_DIR, not the recorded absolute path, so a run directory
+        # stays usable across machines and between host and container.
+        sdir = paths.data_dir() / "stats" / info["cache_key"]
+        df = source_table(name, sdir, info["units"], allow_incomplete)
         n0 = len(df)
         df = df[df[count_col(name)] >= config.merge.min_pixel_count]
         log.info(
