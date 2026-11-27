@@ -1,0 +1,67 @@
+# --- Secrets and local environment -------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Data: this repository is public and holds code only ---------------------
+data/
+outputs/
+runs/
+tessera_data/
+*.npy
+*.npz
+*.tif
+*.tiff
+*.TIF
+*.TIFF
+*.vrt
+*.nc
+*.h5
+*.hdf5
+*.zarr/
+*.parquet
+*.geoparquet
+*.feather
+*.arrow
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.geojson
+*.fgb
+*.joblib
+*.pkl
+*.pickle
+*.zip
+*.gz
+*.tar
+*.7z
+tessera_metadata.json
+global_0.1_degree_representation*/
+global_0.1_degree_tiff_all/
+
+# --- Python / tooling caches --------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.cache/
+
+# --- Notebooks ---------------------------------------------------------------
+.ipynb_checkpoints/
+
+# --- Editors / OS ---------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
