@@ -28,6 +28,7 @@ flowchart LR
     M --> C["3 · cluster<br/>L2 → PCA → MiniBatchKMeans<br/>per k"]
     C --> E["4 · evaluate<br/>silhouette, DB, CH,<br/>inertia, seed-ARI"]
     C --> P["5 · map<br/>COG (EPSG:3035)<br/>+ PNG quick-look"]
+    C --> K["6 · compare<br/>NO vs SE shares per cluster,<br/>JSD vs within-country baseline"]
     F["future sources<br/>(climate, terrain)"] -. "same grid, joined on cell_id" .-> M
 ```
 
@@ -38,7 +39,8 @@ flowchart LR
 | 3 cluster | `tessera-nordic cluster CONFIG` | `cluster/preprocess.joblib`, `model_k<k>.joblib`, `labels.parquet`, `pca_explained_variance.csv` |
 | 4 evaluate | `tessera-nordic evaluate CONFIG` | `evaluate/metrics.csv`, `metrics_vs_k.png`, `pca_explained_variance.png` |
 | 5 map | `tessera-nordic map CONFIG` | `map/clusters_k<k>.tif` (COG), `map/clusters_k<k>.png` |
-| all | `tessera-nordic run CONFIG` | all of the above in one run directory |
+| 6 compare | `tessera-nordic compare CONFIG` | `compare/summary.csv` (JSD, overlap, within-country baselines, shared/country-specific clusters per k), `cluster_shares.csv`, `embedding_distance.csv`, plots |
+| all | `tessera-nordic run CONFIG` | all of the above in one run directory (compare only if configured) |
 | plan | `tessera-nordic plan CONFIG` | tile count and volume estimate, no download |
 
 Every run writes to `${TN_OUTPUT_DIR}/<run_name>/<timestamp>/` together with
@@ -107,6 +109,26 @@ The image's entry point is the CLI, so any stage works (`aggregate configs/pilot
 the three directories are `/data`, `/outputs` and `/tessera`; mount host directories
 there. To use your own config, mount it as well (`-v $PWD/my.yaml:/app/configs/my.yaml`).
 
+## Comparing Norway and Sweden
+
+The research question is whether the two countries' embeddings are distributed
+similarly. All cells of both countries go through **one shared clustering**, and the
+`compare` stage then compares the countries' distributions over those clusters:
+
+- the share of each country's cells in every cluster, with 95% intervals from a
+  spatial block bootstrap (cells are autocorrelated, so 50 km blocks are resampled);
+- the Jensen–Shannon divergence (0 = identical, 1 = disjoint) and the histogram
+  overlap between the two distributions;
+- a **within-country baseline**: the same divergence between two random halves of one
+  country. Two countries are "as similar as the two halves of one country" when the
+  size-matched `jsd_between_halves` sits within the `jsd_within_*` baselines;
+- the clusters that are shared and those that occur in only one country;
+- independently of the clustering, the energy distance between the countries in PCA
+  space, next to the same within-country baseline.
+
+`configs/sample.yaml` runs this on a seeded random 5% of all tiles, which is enough to
+estimate each country's distribution. `configs/full.yaml` runs it on everything.
+
 ## Configuration
 
 One YAML file per run, validated by pydantic (unknown keys are rejected). The
@@ -116,6 +138,7 @@ shipped configs are:
 |---|---|---|
 | [`configs/smoke.yaml`](configs/smoke.yaml) | 2 × 2 tiles around Trondheim | quick end-to-end check |
 | [`configs/pilot.yaml`](configs/pilot.yaml) | lon 10–12, lat 63.2–63.6: Trøndelag coast → mountains → Jämtland border | first analysis; comments show how to widen it east into Jämtland |
+| [`configs/sample.yaml`](configs/sample.yaml) | seeded random 5% of the Norway + Sweden tiles | country-scale distribution comparison at ~1/20 of the cost |
 | [`configs/full.yaml`](configs/full.yaml) | mainland Norway + Sweden from a boundary polygon | full study |
 
 Every config sets the run name, area, year (2024), embedding version and variant, grid

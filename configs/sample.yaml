@@ -1,0 +1,71 @@
+# Country-scale sample: a seeded random 5 % of all 0.1-deg tiles of mainland Norway and
+# Sweden, to compare the two countries' embedding distributions with one shared
+# clustering (see the `compare` stage) without streaming the full ~1.2 TB.
+#
+# Size: 5 % of 15 863 tiles = 793 tiles, ~60 GB streamed, ~35 000 cells of 1 km.
+# Needs the GISCO boundary file (README "Country boundaries").
+run_name: sample
+seed: 42
+year: 2024
+
+area:
+  name: Norway and Sweden (mainland), 5% tile sample
+  boundary:
+    path: ${TN_DATA_DIR}/boundaries/CNTR_RG_01M_2020_4326.gpkg
+    column: CNTR_ID
+    values: ["NO", "SE"]   # quoted: bare NO is YAML for false
+    clip_bbox: [4.0, 54.5, 32.0, 71.5]
+
+sources:
+  tessera:
+    backend: zarr
+    dataset_version: v1.1
+    dataset_variant: dclimate
+    apply_landmask: true
+
+grid:
+  crs: EPSG:3035
+  cell_size: 1000
+
+aggregate:
+  workers: 8
+  sample_fraction: 0.05
+  keep_raw: false
+  max_retries: 6
+  retry_backoff_s: 30
+
+merge:
+  min_pixel_count: 2500
+  clip_to_area: true
+
+cluster:
+  feature_prefixes: [tessera_mean_]
+  l2_normalize: true
+  pca:
+    n_components: 16
+    whiten: false
+  method: minibatch_kmeans
+  k: [5, 8, 12, 16, 20]
+  params:
+    batch_size: 8192
+    n_init: 5
+    max_iter: 300
+
+evaluate:
+  silhouette_sample: 50000
+  stability_seeds: [0, 1, 2, 3, 4]
+
+map:
+  dpi: 200
+
+# Norway vs Sweden over the shared clusters (stage 6, `tessera-nordic compare`).
+compare:
+  groups:
+    path: ${TN_DATA_DIR}/boundaries/CNTR_RG_01M_2020_4326.gpkg
+    column: CNTR_ID
+    values: ["NO", "SE"]
+    clip_bbox: [4.0, 54.5, 32.0, 71.5]
+  block_size: 50000                # m; spatial blocks for the bootstrap
+  n_bootstrap: 500
+  min_share: 0.01                  # cluster "present" in a country at >= 1 % of its cells
+  energy_sample: 3000

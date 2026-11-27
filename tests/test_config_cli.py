@@ -75,7 +75,7 @@ def test_run_dirs_are_timestamped_and_latest_is_found(env_dirs) -> None:
 def test_cli_help_lists_every_stage() -> None:
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
-    for stage in ("aggregate", "merge", "cluster", "evaluate", "map", "run", "plan"):
+    for stage in ("aggregate", "merge", "cluster", "evaluate", "map", "compare", "run", "plan"):
         assert stage in result.output
 
 

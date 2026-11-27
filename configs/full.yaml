@@ -63,3 +63,15 @@ evaluate:
 
 map:
   dpi: 200
+
+# Norway vs Sweden over the shared clusters (stage 6, `tessera-nordic compare`).
+compare:
+  groups:
+    path: ${TN_DATA_DIR}/boundaries/CNTR_RG_01M_2020_4326.gpkg
+    column: CNTR_ID
+    values: ["NO", "SE"]
+    clip_bbox: [4.0, 54.5, 32.0, 71.5]
+  block_size: 50000                # m; spatial blocks for the bootstrap
+  n_bootstrap: 500
+  min_share: 0.01                  # cluster "present" in a country at >= 1 % of its cells
+  energy_sample: 3000

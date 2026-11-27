@@ -160,8 +160,18 @@ def map_(config_path: ConfigArg, run_dir: RunDirOpt = None) -> None:
 
 
 @app.command()
+def compare(config_path: ConfigArg, run_dir: RunDirOpt = None) -> None:
+    """Stage 6: compare groups (e.g. countries) over the shared clusters."""
+    from tessera_nordic.pipeline.compare import run_compare
+
+    config, rd = _prepare(config_path, run_dir, new=False)
+    write_run_record(rd, config, config_path, "compare")
+    _guard("compare", lambda: run_compare(config, rd))
+
+
+@app.command()
 def run(config_path: ConfigArg, run_dir: RunDirOpt = None, workers: WorkersOpt = None) -> None:
-    """Run all stages (aggregate, merge, cluster, evaluate, map) in one run directory."""
+    """Run all stages (aggregate .. map, plus compare if configured) in one run directory."""
     from tessera_nordic.pipeline.cluster import run_cluster
     from tessera_nordic.pipeline.evaluate import run_evaluate
     from tessera_nordic.pipeline.mapping import run_map
@@ -177,6 +187,10 @@ def run(config_path: ConfigArg, run_dir: RunDirOpt = None, workers: WorkersOpt =
     _guard("cluster", lambda: run_cluster(config, rd))
     _guard("evaluate", lambda: run_evaluate(config, rd))
     _guard("map", lambda: run_map(config, rd))
+    if config.compare is not None:
+        from tessera_nordic.pipeline.compare import run_compare
+
+        _guard("compare", lambda: run_compare(config, rd))
     log.info("Pipeline finished in %.1f min; outputs in %s", (time.monotonic() - start) / 60, rd)
 
 

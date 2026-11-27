@@ -114,6 +114,13 @@ class AggregateConfig(_Strict):
     )
     max_retries: int = Field(default=4, ge=0, description="Retries per tile after a failure.")
     retry_backoff_s: float = Field(default=10.0, ge=0, description="Base backoff in seconds.")
+    sample_fraction: float = Field(
+        default=1.0,
+        gt=0,
+        le=1,
+        description="Process a seeded random sample of this fraction of the area's tiles "
+        "(e.g. 0.05 to estimate a country-scale distribution cheaply).",
+    )
     max_tiles: int | None = Field(
         default=None, ge=1, description="Process at most this many tiles (for testing)."
     )
@@ -184,6 +191,37 @@ class MapConfig(_Strict):
     dpi: int = Field(default=150, ge=50)
 
 
+class CompareConfig(_Strict):
+    """Compare how groups of cells (e.g. countries) are distributed over the shared clusters."""
+
+    groups: BoundaryConfig = Field(
+        description="Polygons defining the groups; each value of `column` in `values` is a group."
+    )
+    block_size: int = Field(
+        default=50_000,
+        gt=0,
+        description="Spatial block size (m) for the block bootstrap; cells are autocorrelated, "
+        "so whole blocks are resampled.",
+    )
+    n_bootstrap: int = Field(default=500, ge=50)
+    min_share: float = Field(
+        default=0.01,
+        gt=0,
+        lt=1,
+        description="A cluster counts as present in a group if it holds at least this share "
+        "of the group's cells.",
+    )
+    energy_sample: int = Field(
+        default=3000, ge=100, description="Cells per group for the energy distance."
+    )
+
+    @model_validator(mode="after")
+    def _needs_groups(self) -> CompareConfig:
+        if self.groups.column is None or not self.groups.values or len(self.groups.values) < 2:
+            raise ValueError("compare.groups needs `column` and at least two `values`")
+        return self
+
+
 class SourcesConfig(_Strict):
     """Enabled feature sources. Add new sources here as optional fields."""
 
@@ -204,6 +242,9 @@ class RunConfig(_Strict):
     cluster: ClusterConfig
     evaluate: EvaluateConfig = Field(default_factory=EvaluateConfig)
     map: MapConfig = Field(default_factory=MapConfig)
+    compare: CompareConfig | None = Field(
+        default=None, description="Optional group comparison (e.g. Norway vs Sweden)."
+    )
 
 
 def load_config(path: str | Path) -> RunConfig:

@@ -147,3 +147,14 @@ def test_full_pipeline_on_synthetic_tiles(
     assert prov["year"] == 2024 and "commit" in prov["git"]
     assert prov["tessera_embedding_version"]["dataset_variant"] == "synthetic"
     assert (run_dir / "config.resolved.yaml").exists()
+
+
+def test_tile_sample_is_reproducible_and_order_independent() -> None:
+    from tessera_nordic.pipeline.aggregate import sample_units
+    from tessera_nordic.sources.base import WorkUnit
+
+    units = [WorkUnit(f"2024_{i:03d}") for i in range(200)]
+    a = sample_units(units, 0.1, seed=3)
+    b = sample_units(list(reversed(units)), 0.1, seed=3)
+    assert len(a) == 20 and [u.unit_id for u in a] == [u.unit_id for u in b]
+    assert [u.unit_id for u in sample_units(units, 0.1, seed=4)] != [u.unit_id for u in a]

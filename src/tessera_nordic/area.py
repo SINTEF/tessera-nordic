@@ -11,23 +11,19 @@ from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 from shapely.prepared import prep
 
-from tessera_nordic.config import AreaConfig
+from tessera_nordic.config import AreaConfig, BoundaryConfig
 
 log = logging.getLogger(__name__)
 
 TILE_DEG = 0.1
 
 
-def load_area_geometry(area: AreaConfig) -> BaseGeometry:
-    """Return the study area as one (multi)polygon in EPSG:4326.
+def read_boundary(cfg: BoundaryConfig) -> gpd.GeoDataFrame:
+    """Read a boundary file, keep the configured features and return them in EPSG:4326.
 
     Args:
-        area: Area configuration (bbox or boundary file).
+        cfg: Boundary configuration.
     """
-    if area.bbox is not None:
-        return box(*area.bbox)
-    assert area.boundary is not None
-    cfg = area.boundary
     path = cfg.resolved_path()
     if not path.exists():
         raise FileNotFoundError(
@@ -41,14 +37,50 @@ def load_area_geometry(area: AreaConfig) -> BaseGeometry:
         gdf = gdf[gdf[cfg.column].astype(str).isin(cfg.values)]
         if gdf.empty:
             raise ValueError(f"no features in {path} with {cfg.column} in {cfg.values}")
-    gdf = gdf.to_crs("EPSG:4326")
-    geom = shapely.union_all(shapely.make_valid(gdf.geometry.values))
-    if cfg.clip_bbox is not None:
-        geom = geom.intersection(box(*cfg.clip_bbox))
+    log.info("Loaded boundary %s (%d features)", path.name, len(gdf))
+    return gdf.to_crs("EPSG:4326")
+
+
+def _clean(geoms: object, clip_bbox: tuple[float, float, float, float] | None) -> BaseGeometry:
+    geom = shapely.union_all(shapely.make_valid(geoms))
+    if clip_bbox is not None:
+        geom = geom.intersection(box(*clip_bbox))
+    return geom
+
+
+def load_area_geometry(area: AreaConfig) -> BaseGeometry:
+    """Return the study area as one (multi)polygon in EPSG:4326.
+
+    Args:
+        area: Area configuration (bbox or boundary file).
+    """
+    if area.bbox is not None:
+        return box(*area.bbox)
+    assert area.boundary is not None
+    gdf = read_boundary(area.boundary)
+    geom = _clean(gdf.geometry.values, area.boundary.clip_bbox)
     if geom.is_empty:
         raise ValueError("area geometry is empty after filtering/clipping")
-    log.info("Loaded boundary %s (%d features)", path.name, len(gdf))
     return geom
+
+
+def load_group_geometries(cfg: BoundaryConfig) -> dict[str, BaseGeometry]:
+    """One (multi)polygon per value of ``cfg.column`` (EPSG:4326), e.g. one per country.
+
+    Args:
+        cfg: Boundary configuration with ``column`` and ``values`` set.
+    """
+    if cfg.column is None or cfg.values is None:
+        raise ValueError("group boundaries need `column` and `values`")
+    gdf = read_boundary(cfg)
+    groups = {}
+    for value in cfg.values:
+        sel = gdf[gdf[cfg.column].astype(str) == value]
+        geom = _clean(sel.geometry.values, cfg.clip_bbox)
+        if geom.is_empty:
+            raise ValueError(f"group {value!r} has no geometry")
+        groups[value] = geom
+    return groups
 
 
 def tile_box(lon: float, lat: float) -> BaseGeometry:

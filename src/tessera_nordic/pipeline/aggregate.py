@@ -19,6 +19,8 @@ from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wai
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from tessera_nordic import paths
 from tessera_nordic.area import load_area_geometry
 from tessera_nordic.config import AggregateConfig, RunConfig
@@ -123,6 +125,19 @@ def process_with_retry(
                 delay,
             )
             time.sleep(delay)
+
+
+def sample_units(units: Sequence[WorkUnit], fraction: float, seed: int) -> list[WorkUnit]:
+    """A reproducible random sample of ``units``.
+
+    The draw depends only on the unit ids and the seed, so a rerun selects the same
+    units (and resumes them) regardless of listing order.
+    """
+    ordered = sorted(units, key=lambda u: u.unit_id)
+    n = max(1, round(fraction * len(ordered)))
+    rng = np.random.default_rng(seed)
+    idx = np.sort(rng.choice(len(ordered), size=n, replace=False))
+    return [ordered[i] for i in idx]
 
 
 # --- worker-process state (spawn start method) --------------------------------------
@@ -272,6 +287,15 @@ def run_aggregate(
         sdir = stats_dir(source)
         manifest = Manifest(sdir)
         units = source.list_units(geom)
+        if config.aggregate.sample_fraction < 1:
+            units = sample_units(units, config.aggregate.sample_fraction, config.seed)
+            log.info(
+                "%s: random sample of %d units (fraction %.3f, seed %d)",
+                source.name,
+                len(units),
+                config.aggregate.sample_fraction,
+                config.seed,
+            )
         if config.aggregate.max_tiles is not None:
             units = units[: config.aggregate.max_tiles]
         done = manifest.completed()

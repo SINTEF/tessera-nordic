@@ -189,3 +189,28 @@ configs and README.
 - The TESSERA dataset is pinned in each config (`dataset_version`,
   `dataset_variant`) and recorded with the model and store build versions in
   `provenance.json`.
+
+## 6. Comparing the two countries' distributions
+
+- **Question:** are Norway's and Sweden's embeddings distributed similarly? We answer
+  it with one clustering fitted on both countries together, then compare each
+  country's cluster histogram. Clustering each country separately and matching
+  centroids was rejected because the match itself would add an uncertain step.
+- **Measures:** Jensen–Shannon divergence (base 2) and histogram overlap between the
+  cluster shares, plus the energy distance in PCA space as a check that does not
+  depend on the clustering.
+- **Uncertainty:** neighbouring 1 km cells are strongly correlated, so naive per-cell
+  resampling would give far too narrow intervals. We resample whole 50 km blocks
+  (`compare.block_size`).
+- **Baseline:** a divergence is only meaningful relative to natural variation. We
+  compare the JSD between a random half of each country with the JSD between two
+  random halves of the *same* country, at the same sample size, because finite-sample
+  JSD is biased upwards.
+- **Sampling:** `aggregate.sample_fraction` draws a seeded random subset of tiles
+  (reproducible and resumable). A 5% sample (~790 tiles) estimates each country's
+  distribution at about 1/20 of the full run's download.
+- **Border analysis (2026-11-27, exploratory):** on a strip across the border at
+  63.0–63.8° N, a country classifier reached 92% balanced accuracy overall but
+  separated the real border no better than placebo lines drawn inside one country,
+  and neighbouring cells differed no more across the border than within a country.
+  Locally, differences between the countries reflect landscape, not a border effect.
