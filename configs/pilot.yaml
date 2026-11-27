@@ -4,7 +4,7 @@
 #   20 x 4 = 80 tiles of 0.1 deg, ~77 MB each (int8 embeddings + scales at ~63.4 N)
 #   => ~6 GB streamed, ~4 400 cells of 1 km. Raw data is not kept (keep_raw: false),
 #   so local disk use is only the per-tile statistics (~25 MB in total).
-#   At ~10 s per tile per worker, 4 workers need roughly 4-10 min (network bound).
+#   Measured 2026-11-27: 6.5 min end to end with 4 workers (~12 tiles/min), 4 480 cells.
 #
 # Widening eastward into Jämtland (boreal forest, Storsjön, Östersund ~14.6 E):
 #   bbox: [10.0, 63.0, 15.0, 64.0]
