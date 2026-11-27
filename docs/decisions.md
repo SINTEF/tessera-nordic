@@ -131,7 +131,7 @@ configs and README.
   EPSG:3035 coordinates, which is the alignment the EEA grid uses. The cell
   size is set in the config.
 - **Cell id:** an `int64` packing the column and row index
-  (`(ix + 2^31) << 32 | (iy + 2^31)`, with `ix = floor(x / size)`).
+  (`(ix + 2^30) << 32 | (iy + 2^30)`, with `ix = floor(x / size)`).
   A readable `cell_code` in EEA style is stored too, for example
   `1kmE4321N3210` (the lower-left corner divided by the cell size).
 - **Pixel to cell:** every valid 10 m pixel centre is projected from its
