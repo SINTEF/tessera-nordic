@@ -145,14 +145,14 @@ TESSERA tiles are 0.1° × 0.1°. At 63° N one tile is about 5 × 11 km, 1125 �
 pixels, and about 77 MB as int8 embeddings plus scales. Tiles get narrower further
 north. The default `zarr` backend streams each tile and keeps nothing on disk unless
 `keep_raw: true`, which enables a local chunk cache in `TESSERA_DATA_DIR`. The per-tile
-statistics are small (about 30–150 kB per tile).
+statistics are small (about 300 kB per tile, measured).
 
 | Run | Tiles | Streamed | 1 km cells | Stats cache | Typical runtime |
 |---|---|---|---|---|---|
-| smoke (measured) | 4 | ~0.3 GB | 230 (of 253 before `min_pixel_count`) | ~0.6 MB | 51 s end to end, 2 workers (aggregate 40 s) |
-| pilot | 80 | ~6 GB | ~4 400 | ~10 MB | 5–15 min, 4 workers |
-| pilot widened (lon 10–15, lat 63–64) | 500 | ~38 GB | ~28 000 | ~50 MB | 1–2 h, 4–8 workers |
-| full (NO + SE) | ~15 000–18 000 (estimate) | ~1 TB | ~0.8 M | ~2 GB | 1–3 days, 8–16 workers |
+| smoke (measured) | 4 | ~0.3 GB | 230 (of 253 before `min_pixel_count`) | 1.2 MB | 51 s end to end, 2 workers (aggregate 40 s) |
+| pilot | 80 | ~6 GB | ~4 400 | ~25 MB | 5–15 min, 4 workers |
+| pilot widened (lon 10–15, lat 63–64) | 500 | ~38 GB | ~28 000 | ~150 MB | 1–2 h, 4–8 workers |
+| full (NO + SE) | ~15 000–18 000 (estimate) | ~1 TB | ~0.8 M | ~5 GB | 1–3 days, 8–16 workers |
 
 The full-run numbers are estimates from land area. `make plan-full` prints the exact
 tile count once the boundary file is in place. Throughput is limited by the network:
@@ -160,7 +160,7 @@ we measured 8–10 s per tile per worker, but one fetch took 99 s.
 
 **Memory:** each worker holds one quantised tile plus working arrays, about
 0.5–1 GB peak. The merge of the full run holds all cell statistics in memory, about
-3–5 GB. Clustering 0.8 M cells × 16 PCA components is light.
+5–8 GB. Clustering 0.8 M cells × 16 PCA components is light.
 
 **Suggested VM for the full run:** 8–16 vCPU, 32 GB RAM, 50 GB disk (outputs, cache,
 logs; add about 1 TB only if you set `keep_raw: true`), and a fast, stable connection.
