@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from shapely.geometry import box
 
 from tessera_nordic import paths
 from tessera_nordic.config import RunConfig, WorldCoverConfig
@@ -72,11 +73,25 @@ def test_water_filter_in_merge(env_dirs, small_config: RunConfig) -> None:
 
     no_filter = RunConfig.model_validate(config.model_dump() | {"merge": {"min_pixel_count": 50}})
     run_merge(no_filter, run_dir)
-    assert (pd.read_parquet(run_dir / "cells.parquet")[water.name] > 0.2).any()
+    joined = pd.read_parquet(run_dir / "cells.parquet")
+    assert (joined[water.name] > 0.2).any()
+
+
+def test_one_tile_gives_the_same_cells_in_both_sources(small_config: RunConfig) -> None:
+    # Tile keys are tile centres for both sources; a half-tile offset would show here.
+    grid = Grid("EPSG:3035", 1000)
+    tess = make_source(small_config, FakeReader())
+    wc = FakeWorldCover(WorldCoverConfig(), grid)
+    box_area = box(10.3, 63.3, 10.4, 63.4)
+    unit_t = tess.list_units(box_area)[0]
+    unit_w = wc.list_units(box_area)[0]
+    assert unit_t.params["sample_key"] == unit_w.params["sample_key"]
+    ct = set(tess.process_unit(unit_t, grid).cell_id)
+    cw = set(wc.process_unit(unit_w, grid).cell_id)
+    assert len(ct & cw) / len(ct | cw) > 0.85
 
 
 def test_sources_sample_the_same_tiles(small_config: RunConfig) -> None:
-    from shapely.geometry import box
 
     grid = Grid("EPSG:3035", 1000)
     area = box(5, 58, 15, 66)

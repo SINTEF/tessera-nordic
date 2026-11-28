@@ -132,7 +132,7 @@ class WorldCoverSource(FeatureSource):
         return self._open[name]
 
     def read_window(self, lon: float, lat: float) -> np.ndarray | None:
-        """Class codes of the tile's own ``[lon, lon+0.1) x [lat, lat+0.1)`` box."""
+        """Class codes of the box ``[lon, lon+0.1) x [lat, lat+0.1)`` (lower-left corner)."""
         from rasterio.windows import Window
 
         name, x0, y0 = super_tile(lon + 1e-9, lat + 1e-9)
@@ -145,12 +145,17 @@ class WorldCoverSource(FeatureSource):
         return np.asarray(ds.read(1, window=Window(col, row, n, n)))
 
     def process_unit(self, unit: WorkUnit, grid: Grid) -> CellStats:
-        """Read the tile window and reduce it to per-cell class fractions."""
-        lon, lat = float(unit.params["lon"]), float(unit.params["lat"])
-        classes = self.read_window(lon, lat)
+        """Read the tile window and reduce it to per-cell class fractions.
+
+        Unit coordinates are tile *centres* (as for TESSERA); the window starts half a
+        tile to the south-west.
+        """
+        west = float(unit.params["lon"]) - TILE_DEG / 2
+        south = float(unit.params["lat"]) - TILE_DEG / 2
+        classes = self.read_window(west, south)
         if classes is None:
             return CellStats.empty(self.n_features)
-        return window_stats(classes, lon, lat, grid)
+        return window_stats(classes, west, south, grid)
 
     def discard_unit(self, unit: WorkUnit) -> None:
         """Reopen files on retry, in case a connection went stale."""
