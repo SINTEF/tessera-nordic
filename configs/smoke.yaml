@@ -1,0 +1,50 @@
+# Smoke test: 2 x 2 TESSERA tiles (0.2 x 0.2 deg) around Trondheim, central Norway.
+# Quick end-to-end check on real data: ~4 tiles, ~0.3 GB streamed, ~200 cells of 1 km.
+run_name: smoke
+seed: 42
+year: 2024
+
+area:
+  name: Trondheim 2x2 tiles
+  bbox: [10.3, 63.3, 10.5, 63.5]   # min_lon, min_lat, max_lon, max_lat (EPSG:4326), tile-aligned
+
+sources:
+  tessera:
+    backend: zarr                  # zarr (v1.1 dclimate, NO+SE) | npy (v1.1 cambridge, Norway only)
+    dataset_version: v1.1
+    dataset_variant: dclimate
+    apply_landmask: true
+
+grid:
+  crs: EPSG:3035                   # ETRS89-LAEA, EEA reference grid alignment
+  cell_size: 1000                  # metres
+
+aggregate:
+  workers: 2
+  keep_raw: false
+  max_retries: 4
+  retry_backoff_s: 10
+
+merge:
+  min_pixel_count: 2500            # of 10 000 pixels in a full 1 km cell
+  clip_to_area: true
+
+cluster:
+  feature_prefixes: [tessera_mean_]
+  l2_normalize: true
+  pca:
+    n_components: 8
+    whiten: false
+  method: minibatch_kmeans
+  k: [3, 5, 8]
+  params:
+    batch_size: 1024
+    n_init: 3
+    max_iter: 300
+
+evaluate:
+  silhouette_sample: 5000
+  stability_seeds: [0, 1, 2]
+
+map:
+  dpi: 120

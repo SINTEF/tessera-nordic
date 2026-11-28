@@ -1,0 +1,64 @@
+# Pilot: cross-border transect, Trøndelag (NO) coast -> mountains -> Jämtland (SE).
+#
+# Area lon 10.0-12.0, lat 63.2-63.6 (tile-aligned):
+#   20 x 4 = 80 tiles of 0.1 deg, ~77 MB each (int8 embeddings + scales at ~63.4 N)
+#   => ~6 GB streamed, ~4 400 cells of 1 km. Raw data is not kept (keep_raw: false),
+#   so local disk use is only the per-tile statistics (~25 MB in total).
+#   Measured 2026-11-27: 6.5 min end to end with 4 workers (~12 tiles/min), 4 480 cells.
+#
+# Widening eastward into Jämtland (boreal forest, Storsjön, Östersund ~14.6 E):
+#   bbox: [10.0, 63.0, 15.0, 64.0]
+#   => 50 x 10 = 500 tiles, ~38 GB streamed, ~28 000 cells; ~1-2 h with 4-8 workers.
+#   East of 12 E only the zarr backend has data: the npy (cambridge) tiles stop at
+#   the border (see docs/decisions.md).
+#
+# Finished tiles are cached in ${TN_DATA_DIR}/stats/, so widening the bbox later only
+# processes the new tiles.
+run_name: pilot
+seed: 42
+year: 2024
+
+area:
+  name: Trøndelag-Jämtland transect
+  bbox: [10.0, 63.2, 12.0, 63.6]
+
+sources:
+  tessera:
+    backend: zarr
+    dataset_version: v1.1
+    dataset_variant: dclimate
+    apply_landmask: true
+
+grid:
+  crs: EPSG:3035
+  cell_size: 1000
+
+aggregate:
+  workers: 4
+  keep_raw: false
+  max_retries: 5
+  retry_backoff_s: 15
+
+merge:
+  min_pixel_count: 2500
+  clip_to_area: true
+
+cluster:
+  feature_prefixes: [tessera_mean_]
+  l2_normalize: true
+  pca:
+    n_components: 16
+    whiten: false
+  method: minibatch_kmeans
+  k: [5, 8, 12, 16, 20]
+  params:
+    batch_size: 4096
+    n_init: 5
+    max_iter: 300
+
+evaluate:
+  silhouette_sample: 20000
+  stability_seeds: [0, 1, 2, 3, 4]
+
+map:
+  dpi: 150

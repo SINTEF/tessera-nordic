@@ -1,0 +1,93 @@
+# Full run: mainland Norway and Sweden, from a country-boundary polygon.
+#
+# Boundary file (not committed; see README "Country boundaries"):
+#   GISCO Countries 2020, 1:1 million, EPSG:4326, e.g. CNTR_RG_01M_2020_4326.gpkg,
+#   saved under ${TN_DATA_DIR}/boundaries/. Features are selected by CNTR_ID.
+#   With Natural Earth instead: path .../ne_10m_admin_0_countries.shp,
+#   column: ADM0_A3, values: [NOR, SWE].
+#   clip_bbox drops Svalbard and Jan Mayen, should the file include them.
+#
+# Size:
+#   15 863 tiles of 0.1 deg (`tessera-nordic plan`, GISCO 1:1M, 2026-11-27),
+#   ~55-77 MB of tile data per tile, but ~260 MB network transfer (measured) => ~4 TB,
+#   ~0.76 million land cells of 1 km. Network bound: ~9 h at 1 Gbit/s, ~15 h on a laptop.
+run_name: full
+seed: 42
+year: 2024
+
+area:
+  name: Norway and Sweden (mainland)
+  boundary:
+    path: ${TN_DATA_DIR}/boundaries/CNTR_RG_01M_2020_4326.gpkg
+    column: CNTR_ID
+    values: ["NO", "SE"]   # quoted: bare NO is YAML for false
+    clip_bbox: [4.0, 54.5, 32.0, 71.5]
+
+sources:
+  tessera:
+    backend: zarr
+    dataset_version: v1.1
+    dataset_variant: dclimate
+    apply_landmask: true
+  # ESA WorldCover 2021 class fractions per cell (CC BY 4.0), streamed for the same
+  # 0.1-degree tiles; used to drop water cells (merge.max_water_fraction).
+  worldcover:
+    version: v200
+    year: 2021
+
+grid:
+  crs: EPSG:3035
+  cell_size: 1000
+
+aggregate:
+  workers: 12
+  keep_raw: false
+  max_retries: 6
+  retry_backoff_s: 30
+
+merge:
+  min_pixel_count: 2500
+  clip_to_area: true
+  max_water_fraction: 0.2          # drop cells > 20 % water (sea, fjords, lakes)
+
+cluster:
+  feature_prefixes: [tessera_mean_]
+  l2_normalize: true
+  pca:
+    n_components: 16
+    whiten: false
+  method: minibatch_kmeans
+  k: [5, 8, 12, 16, 20]
+  params:
+    batch_size: 8192
+    n_init: 5
+    max_iter: 300
+
+evaluate:
+  silhouette_sample: 50000
+  stability_seeds: [0, 1, 2, 3, 4]
+
+map:
+  dpi: 200
+
+# Norway vs Sweden over the shared clusters (stage 6, `tessera-nordic compare`).
+compare:
+  groups:
+    path: ${TN_DATA_DIR}/boundaries/CNTR_RG_01M_2020_4326.gpkg
+    column: CNTR_ID
+    values: ["NO", "SE"]
+    clip_bbox: [4.0, 54.5, 32.0, 71.5]
+  block_size: 50000                # m; spatial blocks for the bootstrap
+  n_bootstrap: 500
+  min_share: 0.01                  # cluster "present" in a country at >= 1 % of its cells
+  energy_sample: 3000              # cells per country for the energy distance
+  # Embedding-space comparison (independent of the clustering)
+  mmd_sample: 2000                 # cells per country for the kernel MMD
+  n_projections: 200               # directions for the sliced Wasserstein distance
+  c2st_model: hgb                  # classifier two-sample test: hgb | logistic
+  n_folds: 5                       # spatial-block CV folds for the classifier
+  max_cells_per_group: 50000       # cap for the classifier and sliced Wasserstein
+  coverage_k: 5                    # k-NN coverage: "has a counterpart in the other country"
+  coverage_sample: 10000
+  within_reps: 3                   # random block halves per country (baseline)
+  region_angles: 24                # straight-line pseudo-country splits per family (0 = off)

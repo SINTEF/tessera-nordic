@@ -1,0 +1,335 @@
+"""Run configuration: one YAML file per run, validated with pydantic.
+
+Nothing in the library hard-codes paths, areas, years or hyperparameters; they all
+come from a :class:`RunConfig`. Strings in ``area.boundary.path`` may reference
+environment variables (``${TN_DATA_DIR}/boundaries/...``).
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+from typing import Any, Literal
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+_UNRESOLVED_VAR = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?")
+
+
+class _Strict(BaseModel):
+    """Base model that rejects unknown keys, so typos in configs fail loudly."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BoundaryConfig(_Strict):
+    """A vector boundary file (any format GeoPandas reads) and an attribute filter."""
+
+    path: str = Field(description="Path to the vector file; ${ENV_VARS} are expanded.")
+    column: str | None = Field(default=None, description="Attribute used to select features.")
+    values: list[str] | None = Field(default=None, description="Values of `column` to keep.")
+    clip_bbox: tuple[float, float, float, float] | None = Field(
+        default=None,
+        description="Optional (min_lon, min_lat, max_lon, max_lat) the boundary is clipped to, "
+        "e.g. to drop overseas territories.",
+    )
+
+    @model_validator(mode="after")
+    def _column_and_values(self) -> BoundaryConfig:
+        if (self.column is None) != (self.values is None):
+            raise ValueError("boundary.column and boundary.values must be given together")
+        return self
+
+    def resolved_path(self) -> Path:
+        """Return the path with environment variables expanded.
+
+        Raises:
+            ValueError: if a referenced environment variable is not set.
+        """
+        expanded = os.path.expandvars(self.path)
+        if _UNRESOLVED_VAR.search(expanded):
+            raise ValueError(
+                f"Unresolved environment variable in boundary path {self.path!r}; "
+                "set it in your environment or .env file."
+            )
+        return Path(expanded).expanduser()
+
+
+class AreaConfig(_Strict):
+    """Study area: either a WGS84 bbox or a boundary polygon file."""
+
+    name: str = Field(description="Human-readable area name, recorded in provenance.")
+    bbox: tuple[float, float, float, float] | None = Field(
+        default=None, description="(min_lon, min_lat, max_lon, max_lat) in EPSG:4326."
+    )
+    boundary: BoundaryConfig | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> AreaConfig:
+        if (self.bbox is None) == (self.boundary is None):
+            raise ValueError("area needs exactly one of `bbox` or `boundary`")
+        if self.bbox is not None:
+            min_lon, min_lat, max_lon, max_lat = self.bbox
+            if not (-180 <= min_lon < max_lon <= 180 and -90 <= min_lat < max_lat <= 90):
+                raise ValueError(f"invalid bbox {self.bbox}")
+        return self
+
+
+class TesseraConfig(_Strict):
+    """Settings for the TESSERA embeddings feature source."""
+
+    backend: Literal["zarr", "npy"] = Field(
+        default="zarr",
+        description="`zarr` streams from the v1.1 dclimate store (covers NO and SE); "
+        "`npy` downloads deprecated per-tile files (v1.1 cambridge, Norway only).",
+    )
+    dataset_version: str = Field(default="v1.1", description="TESSERA embedding version.")
+    dataset_variant: str = Field(
+        default="dclimate", description="Inference run; variants do not interoperate."
+    )
+    store_url: str | None = Field(
+        default=None, description="Override the Zarr store URL (zarr backend only)."
+    )
+    apply_landmask: bool = Field(
+        default=True, description="Drop pixels flagged as water / no-data upstream."
+    )
+
+
+class WorldCoverConfig(_Strict):
+    """Settings for the ESA WorldCover land-cover source (per-cell class fractions)."""
+
+    version: str = Field(default="v200", description="WorldCover product version.")
+    year: int = Field(default=2021, description="WorldCover map year (v200 = 2021).")
+    url_template: str = Field(
+        default="https://esa-worldcover.s3.eu-central-1.amazonaws.com/{version}/{year}/map/"
+        "ESA_WorldCover_10m_{year}_{version}_{tile}_Map.tif",
+        description="URL of one 3-degree file; {version}, {year} and {tile} are filled in.",
+    )
+
+
+class GridConfig(_Strict):
+    """Target analysis grid."""
+
+    crs: str = Field(default="EPSG:3035", description="Projected CRS of the grid.")
+    cell_size: int = Field(default=1000, gt=0, description="Cell size in CRS units (metres).")
+
+
+class AggregateConfig(_Strict):
+    """Streaming download + per-tile aggregation settings."""
+
+    workers: int = Field(default=2, ge=1)
+    keep_raw: bool = Field(
+        default=False,
+        description="Keep raw downloads (NPY tiles) or the Zarr chunk cache in TESSERA_DATA_DIR.",
+    )
+    max_retries: int = Field(default=4, ge=0, description="Retries per tile after a failure.")
+    retry_backoff_s: float = Field(default=10.0, ge=0, description="Base backoff in seconds.")
+    sample_fraction: float = Field(
+        default=1.0,
+        gt=0,
+        le=1,
+        description="Process a seeded random sample of this fraction of the area's tiles "
+        "(e.g. 0.05 to estimate a country-scale distribution cheaply).",
+    )
+    max_tiles: int | None = Field(
+        default=None, ge=1, description="Process at most this many tiles (for testing)."
+    )
+
+
+class MergeConfig(_Strict):
+    """Per-cell merge settings."""
+
+    min_pixel_count: int = Field(default=2500, ge=1)
+    clip_to_area: bool = Field(
+        default=True, description="Drop cells whose centre lies outside the area geometry."
+    )
+    max_water_fraction: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Drop cells whose WorldCover water share exceeds this (needs "
+        "`sources.worldcover`). Water (sea, fjords, lakes) is embedded like land upstream.",
+    )
+
+
+class PCAConfig(_Strict):
+    """PCA settings."""
+
+    n_components: int = Field(default=16, ge=1)
+    whiten: bool = False
+
+
+class ClusterConfig(_Strict):
+    """Clustering settings."""
+
+    feature_prefixes: list[str] = Field(
+        default_factory=lambda: ["tessera_mean_"],
+        description="Columns of the merged table used as features, selected by prefix.",
+    )
+    l2_normalize: bool = True
+    pca: PCAConfig = Field(default_factory=PCAConfig)
+    method: str = Field(default="minibatch_kmeans", description="Name in the method registry.")
+    k: list[int] = Field(description="A single k or a sweep, e.g. [5, 8, 12].")
+    params: dict[str, Any] = Field(
+        default_factory=lambda: {"batch_size": 4096, "n_init": 3, "max_iter": 300},
+        description="Extra keyword arguments for the clustering method.",
+    )
+
+    @field_validator("k", mode="before")
+    @classmethod
+    def _k_as_list(cls, value: Any) -> Any:
+        return [value] if isinstance(value, int) else value
+
+    @field_validator("k")
+    @classmethod
+    def _k_valid(cls, value: list[int]) -> list[int]:
+        if not value or any(k < 2 for k in value):
+            raise ValueError("every k must be >= 2")
+        return sorted(set(value))
+
+
+class EvaluateConfig(_Strict):
+    """Evaluation settings."""
+
+    silhouette_sample: int = Field(default=20000, ge=100)
+    stability_seeds: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
+
+    @field_validator("stability_seeds")
+    @classmethod
+    def _two_seeds(cls, value: list[int]) -> list[int]:
+        if len(value) < 2:
+            raise ValueError("stability needs at least two seeds")
+        return value
+
+
+class MapConfig(_Strict):
+    """Map output settings."""
+
+    dpi: int = Field(default=150, ge=50)
+
+
+class CompareConfig(_Strict):
+    """Compare how groups of cells (e.g. countries) are distributed over the shared clusters."""
+
+    groups: BoundaryConfig = Field(
+        description="Polygons defining the groups; each value of `column` in `values` is a group."
+    )
+    block_size: int = Field(
+        default=50_000,
+        gt=0,
+        description="Spatial block size (m) for the block bootstrap; cells are autocorrelated, "
+        "so whole blocks are resampled.",
+    )
+    n_bootstrap: int = Field(default=500, ge=50)
+    min_share: float = Field(
+        default=0.01,
+        gt=0,
+        lt=1,
+        description="A cluster counts as present in a group if it holds at least this share "
+        "of the group's cells.",
+    )
+    energy_sample: int = Field(
+        default=3000, ge=100, description="Cells per group for the energy distance."
+    )
+    mmd_sample: int = Field(default=2000, ge=100, description="Cells per group for the kernel MMD.")
+    n_projections: int = Field(
+        default=200, ge=10, description="Random directions for the sliced Wasserstein distance."
+    )
+    c2st_model: Literal["hgb", "logistic"] = Field(
+        default="hgb",
+        description="Classifier for the classifier two-sample test: gradient boosting (`hgb`, "
+        "non-linear) or logistic regression.",
+    )
+    n_folds: int = Field(default=5, ge=2, description="Spatial-block CV folds for the C2ST.")
+    max_cells_per_group: int = Field(
+        default=50_000,
+        ge=100,
+        description="Random cells per group for the classifier test and sliced Wasserstein "
+        "distance (bounds the runtime of large runs).",
+    )
+    coverage_k: int = Field(
+        default=5, ge=1, description="Neighbourhood size k for the k-NN coverage."
+    )
+    coverage_sample: int = Field(
+        default=10_000, ge=100, description="Max cells per group for the k-NN coverage."
+    )
+    within_reps: int = Field(
+        default=3, ge=1, description="Random block halves per group for the within baseline."
+    )
+    region_angles: int = Field(
+        default=24,
+        ge=0,
+        description="Straight-line pseudo-group splits per family for the reference scale "
+        "(0 disables): the pooled area split at the groups' size ratio over 360 degrees, and "
+        "each group split in halves over 180 degrees.",
+    )
+
+    @model_validator(mode="after")
+    def _needs_groups(self) -> CompareConfig:
+        if self.groups.column is None or not self.groups.values or len(self.groups.values) < 2:
+            raise ValueError("compare.groups needs `column` and at least two `values`")
+        return self
+
+
+class SourcesConfig(_Strict):
+    """Enabled feature sources. Add new sources here as optional fields."""
+
+    tessera: TesseraConfig = Field(default_factory=TesseraConfig)
+    worldcover: WorldCoverConfig | None = Field(
+        default=None, description="ESA WorldCover class fractions (e.g. for a water filter)."
+    )
+
+
+class RunConfig(_Strict):
+    """A complete, validated run configuration."""
+
+    run_name: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    seed: int = 42
+    year: int = Field(default=2024, ge=2015)
+    area: AreaConfig
+    sources: SourcesConfig = Field(default_factory=SourcesConfig)
+    grid: GridConfig = Field(default_factory=GridConfig)
+    aggregate: AggregateConfig = Field(default_factory=AggregateConfig)
+    merge: MergeConfig = Field(default_factory=MergeConfig)
+    cluster: ClusterConfig
+    evaluate: EvaluateConfig = Field(default_factory=EvaluateConfig)
+    map: MapConfig = Field(default_factory=MapConfig)
+    compare: CompareConfig | None = Field(
+        default=None, description="Optional group comparison (e.g. Norway vs Sweden)."
+    )
+
+    @model_validator(mode="after")
+    def _water_needs_worldcover(self) -> RunConfig:
+        if self.merge.max_water_fraction is not None and self.sources.worldcover is None:
+            raise ValueError("merge.max_water_fraction needs sources.worldcover")
+        return self
+
+
+def load_config(path: str | Path) -> RunConfig:
+    """Load and validate a run configuration from a YAML file.
+
+    Args:
+        path: Path to the YAML file.
+
+    Returns:
+        The validated configuration.
+    """
+    with Path(path).open(encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: expected a YAML mapping at the top level")
+    return RunConfig.model_validate(data)
+
+
+def dump_config(config: RunConfig, path: str | Path) -> None:
+    """Write the resolved configuration (defaults filled in) as YAML.
+
+    Args:
+        config: The configuration to write.
+        path: Destination file.
+    """
+    data = config.model_dump(mode="json")
+    with Path(path).open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(data, fh, sort_keys=False)

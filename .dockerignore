@@ -1,0 +1,16 @@
+.git
+.venv
+.env
+.env.*
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+data
+outputs
+tessera_data
+*.npy
+*.parquet
+*.tif
+*.tiff
+*.zarr
