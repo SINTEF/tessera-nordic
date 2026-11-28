@@ -35,7 +35,10 @@ RunDirOpt = Annotated[
 WorkersOpt = Annotated[int | None, typer.Option("--workers", "-w", min=1, help="Override workers.")]
 
 # Rough size of one 0.1-degree tile at 10 m (int8 embeddings + scales) at ~63 N.
-_BYTES_PER_TILE = 77e6
+_BYTES_PER_TILE = 77e6  # decoded int8 embeddings + scales of one tile at ~63 N
+# Measured network transfer per tile from the v1.1 dclimate Zarr store (2026-11-28):
+# 240-320 MB, i.e. ~3.4x the decoded size (sub-shard reads fetch more than the window).
+_NETWORK_BYTES_PER_TILE = 260e6
 
 
 def _prepare(config_path: Path, run_dir: Path | None, new: bool) -> tuple[RunConfig, Path]:
@@ -86,14 +89,15 @@ def plan(config_path: ConfigArg) -> None:
     setup_logging()
     config = load_config(config_path)
     tiles = _guard("plan", lambda: tiles_for_geometry(load_area_geometry(config.area)))
-    gb = len(tiles) * _BYTES_PER_TILE / 1e9
     log.info(
-        "%s: %d tiles of 0.1 deg (upper bound; open-sea tiles carry no data), ~%.1f GB to "
-        "stream at ~%.0f MB/tile",
+        "%s: %d tiles of 0.1 deg (upper bound; open-sea tiles carry no data): ~%.2f TB of "
+        "tile data (~%.0f MB/tile decoded), ~%.1f TB network transfer (~%.0f MB/tile measured)",
         config.area.name,
         len(tiles),
-        gb,
+        len(tiles) * _BYTES_PER_TILE / 1e12,
         _BYTES_PER_TILE / 1e6,
+        len(tiles) * _NETWORK_BYTES_PER_TILE / 1e12,
+        _NETWORK_BYTES_PER_TILE / 1e6,
     )
 
 

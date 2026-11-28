@@ -198,30 +198,53 @@ Quote `"NO"` in YAML: unquoted, `NO` is read as the boolean `false`. The `clip_b
 
 TESSERA tiles are 0.1° × 0.1°. At 63° N one tile is about 5 × 11 km, 1125 × 522
 pixels, and about 77 MB as int8 embeddings plus scales. Tiles get narrower further
-north. The default `zarr` backend streams each tile and keeps nothing on disk unless
-`keep_raw: true`, which enables a local chunk cache in `TESSERA_DATA_DIR`. The per-tile
-statistics are small (about 300 kB per tile, measured).
+north. **Network transfer is ~3.4× larger than that** (240–320 MB per tile, measured
+2026-11-28 with background traffic subtracted): the store packs 32 × 32-pixel chunks
+into 4096 × 4096-pixel shards, and reading a 0.1° window out of a shard fetches more
+than the window. The default `zarr` backend streams each tile and keeps nothing on
+disk unless `keep_raw: true`. The per-tile statistics are small (about 300 kB per
+tile, measured).
 
-| Run | Tiles | Streamed | 1 km cells | Stats cache | Typical runtime |
+| Run | Tiles | Network transfer | 1 km cells | Stats cache | Runtime |
 |---|---|---|---|---|---|
-| smoke (measured) | 4 | ~0.3 GB | 230 (of 253 before `min_pixel_count`) | 1.2 MB | 51 s end to end, 2 workers (aggregate 40 s) |
-| pilot (measured) | 80 | ~6 GB | 4 480 (of 4 565) | 24 MB | 6.5 min end to end, 4 workers (~12 tiles/min) |
-| pilot widened (lon 10–15, lat 63–64) | 500 | ~38 GB | ~28 000 | ~150 MB | 1–2 h, 4–8 workers |
-| sample, 5% of NO + SE (measured) | 793 | ~60 GB | 43 300 | +~240 MB | 55 min end to end, 8 workers (~14.6 tiles/min) |
-| full (NO + SE) | 15 863 (`make plan-full`, GISCO 1:1M) | ~1.2 TB | ~0.8 M | ~5 GB | 1–3 days, 8–16 workers |
+| smoke (measured) | 4 | ~1 GB | 230 | 1.2 MB | 51 s end to end, 2 workers |
+| pilot (measured) | 80 | ~20 GB | 4 480 | 24 MB | 6.5 min end to end, 4 workers (~12 tiles/min) |
+| sample, 5% of NO + SE (measured) | 793 | ~0.2 TB | 48 992; 37 984 after the water filter | ~240 MB | 55 min aggregate on a laptop, 8 workers (~14.6 tiles/min); compare 15–33 min |
+| full (NO + SE) | 15 863 (`make plan-full`) | ~4 TB | ~0.98 M; ~0.76 M after the water filter (×20 the sample) | ~5 GB | laptop: ~15 h at the measured 17 tiles/min (12 workers, ~70 MB/s) |
 
 The full-run tile count comes from `make plan-full` with the GISCO boundary (an upper
-bound: open-sea tiles carry no data); the other full-run numbers are estimates. Throughput is limited by the network:
-we measured 8–10 s per tile per worker, but one fetch took 99 s.
+bound: open-sea tiles carry no data); the full-run cell counts scale the sample by 20.
+Throughput is set by bandwidth: 17 tiles/min × 260 MB ≈ 70 MB/s (~600 Mbit/s).
 
 **Memory:** each worker holds one quantised tile plus working arrays, about
 0.5–1 GB peak. The merge of the full run holds all cell statistics in memory, about
-5–8 GB. Clustering 0.8 M cells × 16 PCA components is light.
+5–8 GB. Clustering and comparing ~0.8 M cells × 16 PCA components is light; the
+comparison caps its per-group samples (`compare.max_cells_per_group`).
 
-**Suggested VM for the full run:** 8–16 vCPU, 32 GB RAM, 50 GB disk (outputs, cache,
-logs; add about 1 TB only if you set `keep_raw: true`), and a fast, stable connection.
-With `workers: 12`, the bottleneck is bandwidth, not CPU. A laptop is fine for smoke
-and pilot runs.
+**Suggested VM for the full run:** 16–32 vCPU, 32 GB RAM, 50 GB disk (outputs,
+cache, logs; add ~1.3 TB only for `keep_raw: true`), and ≥ 1 Gbit/s to the internet.
+The store is served from Source Cooperative (AWS us-west-2 behind a CDN), so a VM
+with a fast uplink in any region works. At 1 Gbit/s sustained the ~4 TB take about
+9 h; at ~600 Mbit/s (our laptop) about 15 h. Check the VM provider's ingress costs
+(usually free) and any data cap.
+
+### Input quality and resolution
+
+- **Native resolution:** 10 m pixels, one 128-d embedding per pixel per year (2024),
+  learned from the full Sentinel-1 + Sentinel-2 time series of that year.
+- **Quantisation:** int8 with a per-pixel float scale; the median step is ~3% of a
+  value, but averaging ~10 000 pixels per cell removes it at 1 km.
+- **1 km aggregation:** a full cell averages ~10 000 pixels (median 9 991; 25% of
+  cells, at coasts and borders, have fewer than 7 770; cells under 2 500 are dropped).
+  About half of the pixel-level variance (48%, 28–68% per band) lies *within* cells,
+  so a 1 km mean describes a landscape mixture, not a land-cover class. The per-cell
+  standard deviations are kept in `cells.parquet` but not used for clustering.
+- **Observation density differs by region** (median clear Sentinel-2 observations
+  per pixel in 2024): Bergen coast 33, Trondheim 45, Skåne 49, Kiruna mountains 57,
+  Norrbotten 65, Lofoten 70, Dalarna 78, Finnmark 79. Northern sites lack winter
+  months (polar night), the west coast of Norway is cloudy. Embeddings may carry some
+  of that input difference; the store's `s2_obs_count` / `s1_*_obs_count` could be
+  added as a covariate source.
 
 ## Data and licence
 
