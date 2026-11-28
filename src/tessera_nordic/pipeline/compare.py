@@ -13,8 +13,10 @@ distributions over those clusters:
   with each other rather than with the full-sample ``jsd``;
 - which clusters are shared and which are specific to one group.
 
-Independently of the clustering, it also reports the energy distance between the
-groups in PCA space, next to the same within-group baseline.
+Independently of the clustering, :mod:`tessera_nordic.pipeline.distribution` compares
+the groups directly in embedding space (classifier two-sample test, energy distance,
+MMD, sliced Wasserstein, k-NN coverage) and ranks the real pair among straight-line
+pseudo-group splits, which gives the numbers a reference scale.
 
 Cells are spatially autocorrelated, so all resampling uses whole spatial blocks
 (``compare.block_size``) rather than single cells.
@@ -35,7 +37,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import shapely
-from sklearn.metrics import pairwise_distances
 
 from tessera_nordic.area import load_group_geometries
 from tessera_nordic.config import CompareConfig, RunConfig
@@ -48,39 +49,14 @@ from tessera_nordic.pipeline.cluster import (
     label_col,
     load_cells,
 )
+from tessera_nordic.pipeline.distribution import Space, run_distribution
+from tessera_nordic.twosample import energy_distance, jsd, overlap
+
+__all__ = ["energy_distance", "jsd", "overlap", "run_compare"]
 
 log = logging.getLogger(__name__)
 
 COMPARE_DIR = "compare"
-
-
-def jsd(p: np.ndarray, q: np.ndarray) -> float:
-    """Jensen-Shannon divergence (base 2) between two discrete distributions."""
-    p = np.asarray(p, dtype=np.float64)
-    q = np.asarray(q, dtype=np.float64)
-    p, q = p / p.sum(), q / q.sum()
-    m = (p + q) / 2
-
-    def kl(a: np.ndarray, b: np.ndarray) -> float:
-        nz = a > 0
-        return float(np.sum(a[nz] * np.log2(a[nz] / b[nz])))
-
-    return max(0.0, 0.5 * kl(p, m) + 0.5 * kl(q, m))
-
-
-def overlap(p: np.ndarray, q: np.ndarray) -> float:
-    """Histogram overlap: sum of the element-wise minimum of the two distributions."""
-    p = np.asarray(p, dtype=np.float64)
-    q = np.asarray(q, dtype=np.float64)
-    return float(np.minimum(p / p.sum(), q / q.sum()).sum())
-
-
-def energy_distance(a: np.ndarray, b: np.ndarray) -> float:
-    """Energy distance ``2E|A-B| - E|A-A'| - E|B-B'|`` (Euclidean, 0 for equal distributions)."""
-    ab = pairwise_distances(a, b).mean()
-    aa = pairwise_distances(a).mean()
-    bb = pairwise_distances(b).mean()
-    return float(2 * ab - aa - bb)
 
 
 def assign_groups(x: np.ndarray, y: np.ndarray, crs: str, cfg: CompareConfig) -> np.ndarray:
@@ -236,38 +212,6 @@ def compare_clusters(
     return shares, pair_rows
 
 
-def compare_embeddings(
-    Z: np.ndarray, groups: np.ndarray, blocks: np.ndarray, cfg: CompareConfig, seed: int
-) -> pd.DataFrame:
-    """Energy distance between groups in PCA space, with within-group block-half baselines."""
-    rng = np.random.default_rng(seed)
-    names = _ordered(cfg, set(groups))
-    n = cfg.energy_sample
-
-    def sample(mask: np.ndarray, size: int) -> np.ndarray:
-        idx = np.flatnonzero(mask)
-        return Z[rng.choice(idx, size=min(size, len(idx)), replace=False)]
-
-    rows: list[dict[str, Any]] = []
-    for g in names:
-        ub = np.unique(blocks[groups == g])
-        if len(ub) < 4:
-            continue
-        perm = rng.permutation(ub)
-        half = set(perm[: len(ub) // 2].tolist())
-        in_half = np.array([b in half for b in blocks])
-        e = energy_distance(
-            sample((groups == g) & in_half, n // 2), sample((groups == g) & ~in_half, n // 2)
-        )
-        rows.append({"comparison": f"within {g} (block halves)", "energy_distance": e})
-    for a, b in itertools.combinations(names, 2):
-        e = energy_distance(sample(groups == a, n), sample(groups == b, n))
-        rows.append({"comparison": f"{a} vs {b}", "energy_distance": e})
-    df = pd.DataFrame(rows)
-    log.info("Energy distance in PCA space:\n%s", df.to_string(index=False))
-    return df
-
-
 def plot_shares(shares: pd.DataFrame, k: int, path: Path, dpi: int) -> None:
     """Grouped bars of cluster shares per group with 95% block-bootstrap intervals."""
     d = shares[shares.k == k]
@@ -375,8 +319,19 @@ def run_compare(config: RunConfig, run_dir: Path) -> Path:
 
     X, _ = feature_matrix(df, config.cluster.feature_prefixes)
     Z = joblib.load(run_dir / CLUSTER_DIR / PREPROCESS_FILE).transform(X)
-    compare_embeddings(Z[keep], groups[keep], blocks[keep], cfg, config.seed).to_csv(
-        out / "embedding_distance.csv", index=False
+    sp = Space.build(
+        Z[keep],
+        x[keep],
+        y[keep],
+        blocks[keep],
+        {k: lab[label_col(k)].to_numpy()[keep] for k in config.cluster.k if label_col(k) in lab},
+        cfg,
+        config.seed,
     )
+    scores_groups = groups[keep].astype(str)
+    run_distribution(sp, scores_groups, _ordered(cfg, set(scores_groups)), out, config.map.dpi)
+    cell_scores = pd.read_parquet(out / "cell_scores.parquet")
+    cell_scores.insert(0, "cell_id", df["cell_id"].to_numpy()[keep])
+    cell_scores.to_parquet(out / "cell_scores.parquet", index=False)
     log.info("Wrote %s", out)
     return path

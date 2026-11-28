@@ -6,6 +6,7 @@ from tessera_nordic.config import RunConfig
 from tessera_nordic.grid import Grid
 from tessera_nordic.sources.base import FeatureSource, WorkUnit
 from tessera_nordic.sources.tessera import NpyTileReader, TesseraSource, ZarrTileReader
+from tessera_nordic.sources.worldcover import WorldCoverSource
 
 __all__ = ["FeatureSource", "WorkUnit", "build_sources"]
 
@@ -29,4 +30,7 @@ def build_sources(
     else:
         cache = paths.tessera_dir() / "zarr-cache" if config.aggregate.keep_raw else None
         reader = ZarrTileReader(tcfg, cache)
-    return [TesseraSource(tcfg, config.year, grid, reader)]
+    sources: list[FeatureSource] = [TesseraSource(tcfg, config.year, grid, reader)]
+    if config.sources.worldcover is not None:
+        sources.append(WorldCoverSource(config.sources.worldcover, grid))
+    return sources

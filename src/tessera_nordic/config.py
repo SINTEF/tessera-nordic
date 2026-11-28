@@ -97,6 +97,18 @@ class TesseraConfig(_Strict):
     )
 
 
+class WorldCoverConfig(_Strict):
+    """Settings for the ESA WorldCover land-cover source (per-cell class fractions)."""
+
+    version: str = Field(default="v200", description="WorldCover product version.")
+    year: int = Field(default=2021, description="WorldCover map year (v200 = 2021).")
+    url_template: str = Field(
+        default="https://esa-worldcover.s3.eu-central-1.amazonaws.com/{version}/{year}/map/"
+        "ESA_WorldCover_10m_{year}_{version}_{tile}_Map.tif",
+        description="URL of one 3-degree file; {version}, {year} and {tile} are filled in.",
+    )
+
+
 class GridConfig(_Strict):
     """Target analysis grid."""
 
@@ -132,6 +144,13 @@ class MergeConfig(_Strict):
     min_pixel_count: int = Field(default=2500, ge=1)
     clip_to_area: bool = Field(
         default=True, description="Drop cells whose centre lies outside the area geometry."
+    )
+    max_water_fraction: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Drop cells whose WorldCover water share exceeds this (needs "
+        "`sources.worldcover`). Water (sea, fjords, lakes) is embedded like land upstream.",
     )
 
 
@@ -214,6 +233,38 @@ class CompareConfig(_Strict):
     energy_sample: int = Field(
         default=3000, ge=100, description="Cells per group for the energy distance."
     )
+    mmd_sample: int = Field(default=2000, ge=100, description="Cells per group for the kernel MMD.")
+    n_projections: int = Field(
+        default=200, ge=10, description="Random directions for the sliced Wasserstein distance."
+    )
+    c2st_model: Literal["hgb", "logistic"] = Field(
+        default="hgb",
+        description="Classifier for the classifier two-sample test: gradient boosting (`hgb`, "
+        "non-linear) or logistic regression.",
+    )
+    n_folds: int = Field(default=5, ge=2, description="Spatial-block CV folds for the C2ST.")
+    max_cells_per_group: int = Field(
+        default=50_000,
+        ge=100,
+        description="Random cells per group for the classifier test and sliced Wasserstein "
+        "distance (bounds the runtime of large runs).",
+    )
+    coverage_k: int = Field(
+        default=5, ge=1, description="Neighbourhood size k for the k-NN coverage."
+    )
+    coverage_sample: int = Field(
+        default=10_000, ge=100, description="Max cells per group for the k-NN coverage."
+    )
+    within_reps: int = Field(
+        default=3, ge=1, description="Random block halves per group for the within baseline."
+    )
+    region_angles: int = Field(
+        default=24,
+        ge=0,
+        description="Straight-line pseudo-group splits per family for the reference scale "
+        "(0 disables): the pooled area split at the groups' size ratio over 360 degrees, and "
+        "each group split in halves over 180 degrees.",
+    )
 
     @model_validator(mode="after")
     def _needs_groups(self) -> CompareConfig:
@@ -226,6 +277,9 @@ class SourcesConfig(_Strict):
     """Enabled feature sources. Add new sources here as optional fields."""
 
     tessera: TesseraConfig = Field(default_factory=TesseraConfig)
+    worldcover: WorldCoverConfig | None = Field(
+        default=None, description="ESA WorldCover class fractions (e.g. for a water filter)."
+    )
 
 
 class RunConfig(_Strict):
@@ -245,6 +299,12 @@ class RunConfig(_Strict):
     compare: CompareConfig | None = Field(
         default=None, description="Optional group comparison (e.g. Norway vs Sweden)."
     )
+
+    @model_validator(mode="after")
+    def _water_needs_worldcover(self) -> RunConfig:
+        if self.merge.max_water_fraction is not None and self.sources.worldcover is None:
+            raise ValueError("merge.max_water_fraction needs sources.worldcover")
+        return self
 
 
 def load_config(path: str | Path) -> RunConfig:

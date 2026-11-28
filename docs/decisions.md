@@ -197,8 +197,22 @@ configs and README.
   country's cluster histogram. Clustering each country separately and matching
   centroids was rejected because the match itself would add an uncertain step.
 - **Measures:** Jensen–Shannon divergence (base 2) and histogram overlap between the
-  cluster shares, plus the energy distance in PCA space as a check that does not
-  depend on the clustering.
+  cluster shares. Because those depend on `k` and on one clustering (seed ARI
+  0.5–0.65), the stage also compares the countries directly in the embedding space
+  (`pipeline/distribution.py`): a classifier two-sample test (gradient boosting,
+  5-fold CV holding out 50 km blocks), energy distance, kernel MMD² (one RBF bandwidth
+  for all comparisons), sliced Wasserstein-1, and k-NN coverage ("does the other
+  country have a cell as similar as my own k-th most similar cell elsewhere?").
+- **Coverage radius:** a cell's k-th nearest neighbour is almost always an adjacent
+  cell, so the first version said 43% of Norway had "no counterpart" in the other
+  half of Norway. Neighbours in the cell's own 50 km block are now excluded from the
+  radius (baseline: 12–15% uncovered).
+- **Reference scale:** "two random halves of one country" only measures sampling
+  noise; it does not say whether a difference is large *for two regions*. The stage
+  therefore also cuts the area by straight lines at 24 angles: the pooled area at the
+  Norway/Sweden size ratio, and each country into halves. The real pair's percentile
+  among those splits says whether the national border separates the landscape more
+  than an arbitrary line does.
 - **Uncertainty:** neighbouring 1 km cells are strongly correlated, so naive per-cell
   resampling would give far too narrow intervals. We resample whole 50 km blocks
   (`compare.block_size`).
@@ -214,3 +228,56 @@ configs and README.
   separated the real border no better than placebo lines drawn inside one country,
   and neighbouring cells differed no more across the border than within a country.
   Locally, differences between the countries reflect landscape, not a border effect.
+
+## 7. Water filter (ESA WorldCover)
+
+- **Why:** the v1.1 land mask does not remove water (section 1), so fjords, lakes and
+  near-shore sea inside the country polygons are embedded and clustered like land.
+  Norway has far more fjord and coast than Sweden, so part of any country difference
+  would simply be "more water".
+- **Source:** ESA WorldCover 2021 v200 (10 m, CC BY 4.0), the most detailed open
+  Europe-wide water layer that is published as Cloud-Optimised GeoTIFFs. Each 0.1°
+  TESSERA tile reads only its own 1200 × 1200 pixel window (about 0.4 s); 3° files
+  over open sea do not exist and give empty statistics.
+- **Same tiles:** work units carry a `sample_key` (`<lon>_<lat>`) and
+  `aggregate.sample_fraction` samples by that key, so both sources sample exactly the
+  same tiles. The TESSERA sample is unchanged (checked against the 2026-11-27 run).
+- **Per cell, not per pixel:** WorldCover becomes per-cell class fractions (a separate
+  feature source, not used for clustering), and `merge.max_water_fraction` drops cells
+  above the threshold. Masking per pixel would need WorldCover reprojected onto every
+  TESSERA tile's UTM grid inside the TESSERA source and would invalidate the existing
+  statistics cache; per-cell filtering keeps sources independent. Cells under the
+  threshold still average in their water pixels (at most 20% with the default).
+- **Year:** WorldCover 2021 vs TESSERA 2024. Permanent water changes little in three
+  years; the class fractions are otherwise only used to describe clusters.
+
+### Result on the 5% sample (2026-11-28, before the water filter)
+
+43 300 cells (NO 17 560, SE 25 740), 14.6 min for the comparison stage on a laptop.
+
+| Statistic | NO vs SE | Halves of one country (NO / SE) | Pooled line splits: median (range) | Percentile of NO vs SE |
+|---|---|---|---|---|
+| C2ST AUC | 0.960 | 0.490 / 0.487 | 0.980 (0.94–0.99) | 21 |
+| Energy distance | 0.123 | 0.006 / 0.006 | 0.146 (0.04–0.24) | 42 |
+| Sliced Wasserstein | 0.059 | 0.013 / 0.013 | 0.061 (0.03–0.08) | 46 |
+| Uncovered NO / SE | 0.68 / 0.73 | 0.13–0.15 / 0.12 | 0.71 / 0.72 | 29 / 58 |
+| JSD, k=8 | 0.190 | 0.01 | 0.242 (0.05–0.40) | 29 |
+
+Reading:
+
+- The two countries are clearly *not* identically distributed. A classifier tells
+  them apart with AUC 0.96, against 0.49 for two halves of one country.
+- But **any** straight line through Fennoscandia gives two regions that are just as
+  separable (AUC 0.94–0.99). The embeddings carry a strong regional signature
+  (climate, latitude, relief), so "separable" is the norm for contiguous regions.
+- Against that reference, Norway vs Sweden sits at the 20th–45th percentile on most
+  statistics: the border separates the landscape **less** than a typical line of the
+  same size ratio. North-to-south lines (angles near 90°) separate most.
+- Halves of Norway are more alike than Norway vs Sweden (NO vs SE above every
+  within-Norway split on SWD and JSD). Halves of Sweden are usually *more* different
+  than Norway vs Sweden, because Sweden spans a larger north–south gradient.
+- Coverage: about 70% of cells lack a counterpart at k=5 in the other country, but
+  the same holds for any two contiguous regions (0.55–0.84). At 1 km, cells carry
+  regional detail that does not repeat elsewhere. Clusters 5 and 6 (mountains, far
+  north) are well covered from Sweden's side but not from Norway's: Sweden's mountain
+  cells look Norwegian, while most Norwegian mountain cells have no Swedish match.

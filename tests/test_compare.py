@@ -46,6 +46,13 @@ def test_compare_two_groups(env_dirs, small_config: RunConfig, tmp_path: Path) -
                 "block_size": 3000,
                 "n_bootstrap": 60,
                 "energy_sample": 200,
+                "mmd_sample": 150,
+                "n_projections": 20,
+                "c2st_model": "logistic",
+                "n_folds": 3,
+                "coverage_sample": 300,
+                "within_reps": 1,
+                "region_angles": 4,
             }
         }
     )
@@ -75,7 +82,23 @@ def test_compare_two_groups(env_dirs, small_config: RunConfig, tmp_path: Path) -
     groups = pd.read_parquet(out / "cell_groups.parquet")
     assert set(groups.group) <= {"W", "E", ""}
     assert (groups.group == "W").sum() > 20 and (groups.group == "E").sum() > 20
-    ed = pd.read_csv(out / "embedding_distance.csv")
-    assert "W vs E" in set(ed.comparison)
-    for name in ("shares_k3.png", "divergence_vs_k.png"):
+    dist = pd.read_csv(out / "distribution_summary.csv").set_index("comparison")
+    assert {"W vs E", "within W (block halves)", "within E (block halves)"} <= set(dist.index)
+    row = dist.loc["W vs E"]
+    assert 0 <= row.c2st_auc <= 1 and 0 <= row.uncovered_a <= 1
+    assert row.c2st_auc_ci_low <= row.c2st_auc_ci_high
+    ref = pd.read_csv(out / "reference_splits.csv")
+    assert set(ref.family) == {"pooled", "within W", "within E"}
+    assert len(ref) == 12
+    pct = pd.read_csv(out / "reference_percentiles.csv")
+    assert pct.percentile.between(0, 100).all()
+    scores = pd.read_parquet(out / "cell_scores.parquet")
+    assert "p_E__W_vs_E" in scores and scores.cell_id.is_unique
+    for name in (
+        "shares_k3.png",
+        "divergence_vs_k.png",
+        "reference.png",
+        "c2st_map.png",
+        "coverage_map.png",
+    ):
         assert (out / name).stat().st_size > 1000

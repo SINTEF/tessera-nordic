@@ -130,10 +130,11 @@ def process_with_retry(
 def sample_units(units: Sequence[WorkUnit], fraction: float, seed: int) -> list[WorkUnit]:
     """A reproducible random sample of ``units``.
 
-    The draw depends only on the unit ids and the seed, so a rerun selects the same
-    units (and resumes them) regardless of listing order.
+    The draw depends only on the units' ``sample_key`` (default: the unit id) and the
+    seed, so a rerun selects the same units (and resumes them) regardless of listing
+    order, and sources that share keys (the same 0.1-degree tiles) sample the same tiles.
     """
-    ordered = sorted(units, key=lambda u: u.unit_id)
+    ordered = sorted(units, key=lambda u: str(u.params.get("sample_key", u.unit_id)))
     n = max(1, round(fraction * len(ordered)))
     rng = np.random.default_rng(seed)
     idx = np.sort(rng.choice(len(ordered), size=n, replace=False))

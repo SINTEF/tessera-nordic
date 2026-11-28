@@ -17,6 +17,7 @@ from tessera_nordic.area import load_area_geometry
 from tessera_nordic.config import RunConfig
 from tessera_nordic.grid import Grid, transformer
 from tessera_nordic.pipeline.aggregate import SUMMARY_FILE, unit_path
+from tessera_nordic.sources.worldcover import WATER_INDEX
 from tessera_nordic.stats import CELL_ID, CellStats, finalize, merge_frames
 
 log = logging.getLogger(__name__)
@@ -106,6 +107,17 @@ def run_merge(config: RunConfig, run_dir: Path, allow_incomplete: bool = False) 
         table = df if table is None else table.merge(df, on=CELL_ID, how="inner")
     if table is None or table.empty:
         raise ValueError("no cells left after merging; check the area and min_pixel_count")
+
+    if config.merge.max_water_fraction is not None:
+        water = table[mean_col("worldcover", WATER_INDEX)]
+        wet = water > config.merge.max_water_fraction
+        log.info(
+            "Dropped %d of %d cells with a WorldCover water share > %.2f",
+            int(wet.sum()),
+            len(table),
+            config.merge.max_water_fraction,
+        )
+        table = table[~wet]
 
     cell_id = table[CELL_ID].to_numpy(np.int64)
     x, y = grid.centres(cell_id)

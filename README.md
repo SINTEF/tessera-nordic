@@ -23,23 +23,25 @@ flowchart LR
     subgraph agg["1 · aggregate (parallel, resumable)"]
         T["0.1° tile<br/>fetch + dequantise<br/>mask + keep own pixels"] --> S["per-cell count, sum,<br/>sum of squares<br/>(one Parquet per tile)"]
     end
+    W[("ESA WorldCover 2021<br/>10 m COGs")] --> WT["0.1° tile<br/>class fractions"]
     Z --> T
-    S --> M["2 · merge<br/>sum per cell → mean, std<br/>cells.parquet (GeoParquet)"]
+    S --> M
+    WT --> M["2 · merge<br/>sum per cell → mean, std<br/>cells.parquet (GeoParquet)"]
     M --> C["3 · cluster<br/>L2 → PCA → MiniBatchKMeans<br/>per k"]
     C --> E["4 · evaluate<br/>silhouette, DB, CH,<br/>inertia, seed-ARI"]
     C --> P["5 · map<br/>COG (EPSG:3035)<br/>+ PNG quick-look"]
-    C --> K["6 · compare<br/>NO vs SE shares per cluster,<br/>JSD vs within-country baseline"]
+    C --> K["6 · compare<br/>NO vs SE: cluster shares +<br/>embedding-space tests vs<br/>pseudo-country splits"]
     F["future sources<br/>(climate, terrain)"] -. "same grid, joined on cell_id" .-> M
 ```
 
 | Stage | Command | Output |
 |---|---|---|
 | 1 aggregate | `tessera-nordic aggregate CONFIG` | `${TN_DATA_DIR}/stats/<key>/tiles/*.parquet`, `manifest.jsonl`; `aggregate_summary.json` in the run |
-| 2 merge | `tessera-nordic merge CONFIG` | `cells.parquet`: `cell_id`, `cell_code`, `x`, `y`, `tessera_count`, `tessera_mean_000…127`, `tessera_std_000…127`, point geometry |
+| 2 merge | `tessera-nordic merge CONFIG` | `cells.parquet`: `cell_id`, `cell_code`, `x`, `y`, `tessera_count`, `tessera_mean_000…127`, `tessera_std_000…127`, point geometry; with WorldCover also `worldcover_mean_000…010` (class fractions, order in `provenance.json`); optional water filter |
 | 3 cluster | `tessera-nordic cluster CONFIG` | `cluster/preprocess.joblib`, `model_k<k>.joblib`, `labels.parquet`, `pca_explained_variance.csv` |
 | 4 evaluate | `tessera-nordic evaluate CONFIG` | `evaluate/metrics.csv`, `metrics_vs_k.png`, `pca_explained_variance.png` |
 | 5 map | `tessera-nordic map CONFIG` | `map/clusters_k<k>.tif` (COG), `map/clusters_k<k>.png` |
-| 6 compare | `tessera-nordic compare CONFIG` | `compare/summary.csv` (JSD, overlap, within-country baselines, shared/country-specific clusters per k), `cluster_shares.csv`, `embedding_distance.csv`, plots |
+| 6 compare | `tessera-nordic compare CONFIG` | `compare/summary.csv` (JSD, overlap, within-country baselines, shared/country-specific clusters per k), `cluster_shares.csv`, `distribution_summary.csv` + `reference_percentiles.csv` (embedding-space tests vs pseudo-country splits), plots |
 | all | `tessera-nordic run CONFIG` | all of the above in one run directory (compare only if configured) |
 | plan | `tessera-nordic plan CONFIG` | tile count and volume estimate, no download |
 
@@ -123,8 +125,38 @@ similarly. All cells of both countries go through **one shared clustering**, and
   country. Two countries are "as similar as the two halves of one country" when the
   size-matched `jsd_between_halves` sits within the `jsd_within_*` baselines;
 - the clusters that are shared and those that occur in only one country;
-- independently of the clustering, the energy distance between the countries in PCA
-  space, next to the same within-country baseline.
+
+Cluster shares depend on `k` and on one clustering, so the stage also compares the
+countries **directly in embedding space** (L2-normalised, PCA), in
+`compare/distribution_summary.csv`:
+
+| Statistic | Reads as |
+|---|---|
+| `c2st_auc` | Classifier two-sample test: can a classifier tell the countries apart on held-out 50 km blocks? 0.5 = indistinguishable, 1 = always. |
+| `tv_lower_bound` | At least this share of the two distributions does not overlap (`|2·balanced accuracy − 1|`). |
+| `energy`, `mmd2`, `swd` | Energy distance, kernel MMD² and sliced Wasserstein-1 distance (embedding units). |
+| `uncovered_a`, `uncovered_b` | Share of one country's cells with no counterpart in the other (k-NN coverage): "same landscape types in other proportions" vs "types found in only one country". |
+| `jsd_k<k>` | The cluster-share JSD, for comparison. |
+
+Every statistic is "higher = more different", and comes with two reference scales:
+
+- **within block halves**: one country split into two random halves of its 50 km
+  blocks (same distribution, different places);
+- **pseudo-countries**: the pooled area cut by straight lines at 24 angles into two
+  regions with the Norway/Sweden size ratio, and each country cut by lines into two
+  halves. `reference_percentiles.csv` gives the percentile of the real pair among
+  them, i.e. whether the national border separates the landscape more or less than an
+  arbitrary line. `reference.png` shows all of them in one figure.
+
+Maps: `c2st_map.png` (how Swedish-looking each cell is, out of fold) and
+`coverage_map.png` (cells without a counterpart in the other country);
+`coverage_by_cluster.csv` lists which clusters those cells belong to.
+
+On the 5% sample (before the water filter), Norway and Sweden were clearly
+distinguishable (classifier AUC 0.96), but no more so than two regions on either side
+of a random straight line through Fennoscandia: the real pair sits at the 20th–45th
+percentile of the line splits. Details in
+[docs/decisions.md](docs/decisions.md#6-comparing-the-two-countries-distributions).
 
 `configs/sample.yaml` runs this on a seeded random 5% of all tiles, which is enough to
 estimate each country's distribution. `configs/full.yaml` runs it on everything.
@@ -213,15 +245,24 @@ and pilot runs.
   > Analysis.* arXiv:2506.20380. <https://arxiv.org/abs/2506.20380>
 
 - TESSERA is derived from Copernicus Sentinel-1 and Sentinel-2 data.
+- **ESA WorldCover** (optional `worldcover` source, used for the water filter) is
+  released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/):
+  © ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021)
+  processed by ESA WorldCover consortium. Zanaga, D. et al. (2022) *ESA WorldCover 10 m
+  2021 v200*, doi:[10.5281/zenodo.7254221](https://doi.org/10.5281/zenodo.7254221).
+  It is read window by window from the public AWS bucket; nothing is stored except the
+  per-cell fractions.
 - Country boundaries: see [Country boundaries](#country-boundaries) for the
   source and its terms.
 
 ## Open questions
 
 - **Water is embedded.** The v1.1 land mask was all ones over the fjord and coastal
-  tiles we checked, so fjords, lakes and near-shore sea are clustered with the
-  land. Should we add an external water mask (for example the EEA or Copernicus water
-  layers) as a later feature source, or keep water as its own clusters?
+  tiles we checked, so fjords, lakes and near-shore sea are embedded like land. The
+  `worldcover` source and `merge.max_water_fraction` (0.2 in `sample`/`full`) drop
+  cells that are mostly water; cells below the threshold still average their water
+  pixels in. Masking water per pixel would need WorldCover reprojected onto each
+  TESSERA tile.
 - **Variant choice.** The default is v1.1 `dclimate` (complete coverage). `cambridge`
   is only published as NPY tiles and does not cover Sweden. TESSERA v2 is in beta;
   switching later means re-running `aggregate` (the cache key changes automatically).

@@ -345,7 +345,10 @@ class TesseraSource(FeatureSource):
                 self.cfg.dataset_variant,
             )
         return [
-            WorkUnit(f"{self.year}_{lon:.2f}_{lat:.2f}", {"lon": lon, "lat": lat})
+            WorkUnit(
+                f"{self.year}_{lon:.2f}_{lat:.2f}",
+                {"lon": lon, "lat": lat, "sample_key": f"{lon:.2f}_{lat:.2f}"},
+            )
             for lon, lat in available
         ]
 

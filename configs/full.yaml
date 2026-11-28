@@ -29,6 +29,11 @@ sources:
     dataset_version: v1.1
     dataset_variant: dclimate
     apply_landmask: true
+  # ESA WorldCover 2021 class fractions per cell (CC BY 4.0), streamed for the same
+  # 0.1-degree tiles; used to drop water cells (merge.max_water_fraction).
+  worldcover:
+    version: v200
+    year: 2021
 
 grid:
   crs: EPSG:3035
@@ -43,6 +48,7 @@ aggregate:
 merge:
   min_pixel_count: 2500
   clip_to_area: true
+  max_water_fraction: 0.2          # drop cells > 20 % water (sea, fjords, lakes)
 
 cluster:
   feature_prefixes: [tessera_mean_]
@@ -74,4 +80,14 @@ compare:
   block_size: 50000                # m; spatial blocks for the bootstrap
   n_bootstrap: 500
   min_share: 0.01                  # cluster "present" in a country at >= 1 % of its cells
-  energy_sample: 3000
+  energy_sample: 3000              # cells per country for the energy distance
+  # Embedding-space comparison (independent of the clustering)
+  mmd_sample: 2000                 # cells per country for the kernel MMD
+  n_projections: 200               # directions for the sliced Wasserstein distance
+  c2st_model: hgb                  # classifier two-sample test: hgb | logistic
+  n_folds: 5                       # spatial-block CV folds for the classifier
+  max_cells_per_group: 50000       # cap for the classifier and sliced Wasserstein
+  coverage_k: 5                    # k-NN coverage: "has a counterpart in the other country"
+  coverage_sample: 10000
+  within_reps: 3                   # random block halves per country (baseline)
+  region_angles: 24                # straight-line pseudo-country splits per family (0 = off)
