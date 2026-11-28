@@ -152,10 +152,10 @@ Maps: `c2st_map.png` (how Swedish-looking each cell is, out of fold) and
 `coverage_map.png` (cells without a counterpart in the other country);
 `coverage_by_cluster.csv` lists which clusters those cells belong to.
 
-On the 5% sample (before the water filter), Norway and Sweden were clearly
-distinguishable (classifier AUC 0.96), but no more so than two regions on either side
-of a random straight line through Fennoscandia: the real pair sits at the 20th–45th
-percentile of the line splits. Details in
+On the 5% sample, with or without water cells, Norway and Sweden are clearly
+distinguishable (classifier AUC 0.96–0.97), but no more so than two regions on either
+side of a random straight line through Fennoscandia: the real pair sits at the
+20th–45th percentile of the line splits. Details in
 [docs/decisions.md](docs/decisions.md#6-comparing-the-two-countries-distributions).
 
 `configs/sample.yaml` runs this on a seeded random 5% of all tiles, which is enough to

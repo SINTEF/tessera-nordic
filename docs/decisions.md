@@ -281,3 +281,20 @@ Reading:
   regional detail that does not repeat elsewhere. Clusters 5 and 6 (mountains, far
   north) are well covered from Sweden's side but not from Norway's: Sweden's mountain
   cells look Norwegian, while most Norwegian mountain cells have no Swedish match.
+
+### Effect of the water filter on the 5% sample (2026-11-28)
+
+`max_water_fraction: 0.2` dropped 10 735 of 48 992 cells (22%: coastal sea inside the
+generalised 1:1M outline, fjords, large lakes), leaving 37 984 (NO 15 673, SE 22 311).
+
+| Statistic | With water | Land only (≤ 20% water) | Percentile among pooled line splits (land only) |
+|---|---|---|---|
+| C2ST AUC | 0.960 | 0.966 | 21 |
+| Energy distance | 0.123 | 0.135 | 42 |
+| Sliced Wasserstein | 0.059 | 0.059 | 46 |
+| JSD, k=8 (95% CI) | 0.190 (0.13–0.27) | 0.217 (0.16–0.30) | 29 |
+
+Water was not what made the countries differ: water is a landscape type both share,
+so removing it makes them slightly *more* different. The conclusions above stand:
+the countries are clearly distinguishable, but less than most pairs of regions cut
+by an arbitrary straight line.
