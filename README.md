@@ -96,7 +96,19 @@ skipped. Tiles that still fail after all retries are listed in
 only those. Progress and an ETA are logged every 30 s to the console and to the run's
 `run.log`.
 
-### Docker
+### Slurm cluster
+
+On a machine with Slurm (e.g. a shared server), run the pipeline as a batch job
+instead of in tmux. [scripts/slurm/run.sbatch](scripts/slurm/run.sbatch) requests 16
+CPUs, 64 GB and 2 days on the `long` partition; adjust the `#SBATCH` lines to your
+cluster.
+
+```bash
+sbatch scripts/slurm/run.sbatch configs/full.yaml        # optional 2nd arg: workers
+squeue -u $USER                                          # job state
+tail -f slurm-tessera-nordic-<jobid>.out                 # progress and ETA
+```
+
 
 ```bash
 make docker-build      # docker build --build-arg GIT_COMMIT=... -t tessera-nordic:latest .
